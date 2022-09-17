@@ -18,8 +18,12 @@ def analyze_data():
     # Si el promedio se excede de los límites, se envia un mensaje de alerta.
 
     print("Calculando alertas...")
-    defaultAlerts()
-    alertUmbral()
+    firstAlert = alertUmbral()
+    if (firstAlert == False):
+        defaultAlerts()
+
+    
+    
 
 def alertUmbral():
     data = Data.objects.filter(base_time__gte=datetime.now() - timedelta(hours=1), measurement__name='temperatura')
@@ -55,6 +59,9 @@ def alertUmbral():
             print(timezone.now(), "Sending alert to {} {}".format(topic, variable))
             client.publish(topic, message)
             alerts += 1
+            return True
+    
+    return False
 
 
 def defaultAlerts():
