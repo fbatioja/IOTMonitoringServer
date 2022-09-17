@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 import schedule
 import time
 from django.conf import settings
+from django.utils import timezone
 
 client = mqtt.Client(settings.MQTT_USER_PUB)
 
@@ -17,9 +18,48 @@ def analyze_data():
     # Si el promedio se excede de los límites, se envia un mensaje de alerta.
 
     print("Calculando alertas...")
+    defaultAlerts()
+    alertUmbral()
 
+def alertUmbral():
+    data = Data.objects.filter(base_time__gte=datetime.now() - timedelta(hours=1), measurement__name='temperatura')
+    aggregation = data.annotate(check_value=Avg('avg_value')) \
+    .select_related('station', 'measurement') \
+    .select_related('station__user', 'station__location') \
+    .select_related('station__location__city', 'station__location__state',
+                    'station__location__country') \
+    .values('values', 'check_value', 'station__user__username',
+            'measurement__name',
+            'measurement__max_value',
+            'measurement__min_value',
+            'station__location__city__name',
+            'station__location__state__name',
+            'station__location__country__name')
+
+    alerts = 0    
+    for item in aggregation:
+        alert = False
+
+        variable = item["measurement__name"]
+
+        country = item['station__location__country__name']
+        state = item['station__location__state__name']
+        city = item['station__location__city__name']
+        user = item['station__user__username']
+        values = item['values']
+
+        values = values[-10:]
+        if (all(elem > 30 for elem in values)):
+            message = "ALERT2 T>30"
+            topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
+            print(timezone.now(), "Sending alert to {} {}".format(topic, variable))
+            client.publish(topic, message)
+            alerts += 1
+
+
+def defaultAlerts():
     data = Data.objects.filter(
-        base_time__gte=datetime.now() - timedelta(hours=1))
+    base_time__gte=datetime.now() - timedelta(hours=1))
     aggregation = data.annotate(check_value=Avg('avg_value')) \
         .select_related('station', 'measurement') \
         .select_related('station__user', 'station__location') \
@@ -51,7 +91,7 @@ def analyze_data():
         if alert:
             message = "ALERT {} {} {}".format(variable, min_value, max_value)
             topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
-            print(datetime.now(), "Sending alert to {} {}".format(topic, variable))
+            print(timezone.now(), "Sending alert to {} {}".format(topic, variable))
             client.publish(topic, message)
             alerts += 1
 
@@ -105,7 +145,7 @@ def start_cron():
     Inicia el cron que se encarga de ejecutar la función analyze_data cada 5 minutos.
     '''
     print("Iniciando cron...")
-    schedule.every(30).seconds.do(analyze_data)
+    schedule.every(10).seconds.do(analyze_data)
     print("Servicio de control iniciado")
     while 1:
         schedule.run_pending()
